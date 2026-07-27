@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Three.js Moon Lab</title>
+  <meta name="description" content="Three.jsでLROC月面画像とLOLA系Quantized Meshを表示する単体HTMLビューア">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+      "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.0/build/index.js",
+      "3d-tiles-renderer/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.0/build/index.plugins.js"
+    }
+  }
+  </script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --sidebar: 326px;
+      --panel: rgba(12, 18, 29, 0.92);
+      --panel-soft: rgba(20, 28, 43, 0.82);
+      --line: rgba(148, 163, 184, 0.22);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --blue: #60a5fa;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    #viewport {
+      position: fixed;
+      inset: 0 0 0 var(--sidebar);
+      background: #000;
+    }
+
+    #viewport canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .sidebar {
+      position: fixed;
+      z-index: 20;
+      inset: 0 auto 0 0;
+      width: var(--sidebar);
+      padding: 18px;
+      overflow-y: auto;
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.20), transparent 32%),
+        linear-gradient(180deg, #101827 0%, #070b13 100%);
+      border-right: 1px solid var(--line);
+      box-shadow: 18px 0 45px rgba(0, 0, 0, 0.32);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid rgba(191, 219, 254, 0.35);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 32%, #f8fafc 0 4%, transparent 5%),
+        radial-gradient(circle at 62% 58%, #64748b 0 8%, transparent 9%),
+        radial-gradient(circle at 50% 50%, #cbd5e1, #64748b 68%, #334155 100%);
+      box-shadow: 0 0 28px rgba(148, 163, 184, 0.18);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+    }
+
+    .subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .note {
+      margin: 0 0 14px;
+      padding: 9px 10px;
+      border: 1px solid rgba(96, 165, 250, 0.28);
+      border-radius: 10px;
+      background: rgba(37, 99, 235, 0.08);
+      color: #bfdbfe;
+      font-size: 0.71rem;
+      line-height: 1.45;
+    }
+
+    .section {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--panel-soft);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 10px;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 10px currentColor;
+    }
+
+    .status-dot.ready { background: var(--green); }
+    .status-dot.error { background: var(--red); }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .control {
+      min-height: 38px;
+      padding: 8px 9px;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 9px;
+      background: rgba(30, 41, 59, 0.82);
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.74rem;
+      font-weight: 650;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    .control:hover {
+      border-color: rgba(96, 165, 250, 0.68);
+      background: rgba(37, 99, 235, 0.22);
+      transform: translateY(-1px);
+    }
+
+    .control:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    .control.active {
+      border-color: rgba(52, 211, 153, 0.72);
+      background: rgba(5, 150, 105, 0.24);
+      color: #d1fae5;
+    }
+
+    .control.warning.active {
+      border-color: rgba(251, 191, 36, 0.78);
+      background: rgba(217, 119, 6, 0.24);
+      color: #fef3c7;
+    }
+
+    .readout {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 10px;
+      margin: 0;
+      font-size: 0.72rem;
+    }
+
+    .readout dt { color: var(--muted); }
+    .readout dd {
+      margin: 0;
+      color: #e2e8f0;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .slider-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.71rem;
+    }
+
+    .slider-row input { width: 100%; }
+    .slider-row output { min-width: 2.5em; text-align: right; color: #e2e8f0; }
+
+    .api-list {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-size: 0.69rem;
+      line-height: 1.35;
+    }
+
+    .api-list strong { color: #dbeafe; }
+    .api-list span { display: block; color: var(--muted); overflow-wrap: anywhere; }
+
+    .hud {
+      position: fixed;
+      z-index: 10;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: calc(100vw - var(--sidebar) - 32px);
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(12px);
+      font-size: 0.71rem;
+      white-space: nowrap;
+    }
+
+    .hud::before {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 9px rgba(52, 211, 153, 0.75);
+      content: "";
+    }
+
+    .help-card {
+      position: fixed;
+      z-index: 10;
+      right: 16px;
+      bottom: 54px;
+      width: min(360px, calc(100vw - var(--sidebar) - 32px));
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--panel);
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(12px);
+    }
+
+    .help-card strong { display: block; margin-bottom: 5px; font-size: 0.78rem; }
+    .help-card p { margin: 0; color: var(--muted); font-size: 0.69rem; line-height: 1.5; }
+
+    .statusbar {
+      position: fixed;
+      z-index: 10;
+      right: 0;
+      bottom: 0;
+      left: var(--sidebar);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 10px 18px;
+      border-top: 1px solid var(--line);
+      background: rgba(6, 10, 18, 0.88);
+      color: #cbd5e1;
+      font-size: 0.7rem;
+      backdrop-filter: blur(12px);
+    }
+
+    #statusText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tileStats { color: var(--muted); white-space: nowrap; }
+
+    .loading {
+      position: fixed;
+      z-index: 30;
+      inset: 0 0 0 var(--sidebar);
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.78);
+      transition: opacity 300ms ease, visibility 300ms ease;
+    }
+
+    .loading.hidden { opacity: 0; visibility: hidden; }
+
+    .loading-card {
+      width: min(380px, calc(100% - 40px));
+      padding: 22px;
+      border: 1px solid rgba(96, 165, 250, 0.32);
+      border-radius: 16px;
+      background: rgba(12, 18, 29, 0.96);
+      text-align: center;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.45);
+    }
+
+    .spinner {
+      width: 34px;
+      height: 34px;
+      margin: 0 auto 13px;
+      border: 3px solid rgba(96, 165, 250, 0.2);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    .loading-card strong { display: block; margin-bottom: 6px; font-size: 0.9rem; }
+    .loading-card p { margin: 0; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 760px) {
+      :root { --sidebar: 0px; }
+      #viewport { inset: 0; }
+      .sidebar {
+        inset: auto 10px 48px 10px;
+        width: auto;
+        max-height: 42vh;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+      }
+      .brand, .note, .section.api { display: none; }
+      .hud { max-width: calc(100vw - 24px); top: 10px; right: 12px; }
+      .help-card { display: none; }
+      .loading { inset: 0; }
+      .statusbar { left: 0; padding-inline: 12px; }
+      #tileStats { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main id="viewport" aria-label="Three.js 月面3Dビュー"></main>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1>Three.js Moon Lab</h1>
+        <p class="subtitle">1 HTML · No npm · No Cesium ion / CesiumJS</p>
+      </div>
+    </div>
+
+    <p class="note">このHTMLだけを保存して使えます。ライブラリ、月面画像、標高データの取得にはインターネット接続とローカルHTTPサーバーが必要です。</p>
+
+    <section class="section">
+      <h2 class="section-title">Camera <span id="statusDot" class="status-dot"></span></h2>
+      <div class="button-grid">
+        <button class="control" id="wholeButton">月全体</button>
+        <button class="control" id="apolloButton">Apollo 11</button>
+        <button class="control" id="southButton">南極域</button>
+        <button class="control" id="orbitButton">自動周回</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Layers</h2>
+      <div class="button-grid">
+        <button class="control active" id="imageryButton">LROC画像</button>
+        <button class="control active" id="shadeButton">地形の陰影</button>
+        <button class="control active" id="markersButton">着陸地点</button>
+        <button class="control active" id="baseButton">基地デモ</button>
+        <button class="control active" id="routeButton">走行ルート</button>
+        <button class="control warning" id="analysisButton">仮解析</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Detail</h2>
+      <label class="slider-row">
+        <span>地形精細度</span>
+        <input id="detailSlider" type="range" min="1" max="12" step="1" value="2">
+        <output id="detailValue">2</output>
+      </label>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Measurement</h2>
+      <div class="button-grid">
+        <button class="control" id="measureButton">距離を計測</button>
+        <button class="control" id="clearMeasureButton">計測を消去</button>
+      </div>
+      <p id="measureResult" class="subtitle" style="margin-top:9px">地表上の2点を選択します</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Camera pose</h2>
+      <dl class="readout">
+        <dt>経度</dt><dd id="cameraLon">--</dd>
+        <dt>緯度</dt><dd id="cameraLat">--</dd>
+        <dt>高度</dt><dd id="cameraAlt">--</dd>
+        <dt>距離</dt><dd id="cameraDistance">--</dd>
+      </dl>
+    </section>
+
+    <section class="section api">
+      <h2 class="section-title">Data APIs</h2>
+      <ul class="api-list">
+        <li><strong>月面画像 — LROC QuickMap</strong><span>lroc-tiles.quickmap.io / lunar-fulleqc</span></li>
+        <li><strong>3D標高 — Quantized Mesh</strong><span>dem-tiles.b-cdn.net / lunar-fulleqc</span></li>
+        <li><strong>描画 — Three.js</strong><span>3d-tiles-renderer QuantizedMeshPlugin</span></li>
+      </ul>
+    </section>
+  </aside>
+
+  <div class="hud">LOCAL DEMO&nbsp; · &nbsp;Three.js + LOLA DEM</div>
+
+  <div class="help-card">
+    <strong>月面を操作できます</strong>
+    <p>左ドラッグで回転、右ドラッグまたはホイールでズーム。LROC画像はLOLA系の3D地形に重ねて表示しています。</p>
+  </div>
+
+  <footer class="statusbar">
+    <span id="statusText">月面データを初期化しています</span>
+    <span id="tileStats">Queued: 0 · Loaded: 0 · Visible: 0</span>
+  </footer>
+
+  <div id="loading" class="loading">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <strong id="loadingTitle">月面3Dデータを読み込み中</strong>
+      <p id="loadingMessage">Three.js、地形メッシュ、LROC画像を取得しています。</p>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GlobeControls, TilesRenderer } from "3d-tiles-renderer";
+    import {
+      ImageOverlayPlugin,
+      QuantizedMeshPlugin,
+      TilesFadePlugin,
+      XYZTilesOverlay,
+    } from "3d-tiles-renderer/plugins";
+
+    const MOON_RADIUS = 1_737_400;
+    const TERRAIN_ROOT = "https://dem-tiles.b-cdn.net/lunar/qts_demstack/lunar-fulleqc/";
+    const IMAGERY_TEMPLATE = "https://lroc-tiles.quickmap.io/tiles/wac_nac_nacroi/lunar-fulleqc/{z}/{x}/{y}.jpg";
+    const APOLLO_11 = { lon: 23.47297, lat: 0.67408 };
+    const DEG = THREE.MathUtils.DEG2RAD;
+
+    const el = id => document.getElementById(id);
+    const viewport = el("viewport");
+    const state = {
+      autoOrbit: false,
+      imageryVisible: true,
+      shaded: true,
+      measuring: false,
+      measurePoints: [],
+      measureObjects: [],
+      pointerDown: null,
+      firstVisibleFrame: false,
+      loadErrors: 0,
+      baseHeight: 0,
+      lastSnapAttempt: 0,
+    };
+
+    if (location.protocol === "file:") {
+      el("loadingTitle").textContent = "ローカルHTTPサーバーが必要です";
+      el("loadingMessage").textContent =
+        "file:// ではES Modulesと外部タイルを正しく読み込めません。このフォルダで python3 -m http.server 8000 を実行し、http://127.0.0.1:8000/standalone_moon_three_viewer.html を開いてください。";
+      el("statusDot").classList.add("error");
+      throw new Error("Open this file through a local HTTP server, not file://.");
+    }
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    viewport.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    const camera = new THREE.PerspectiveCamera(50, 1, 1, 30_000_000);
+    scene.add(camera);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.42);
+    const headLight = new THREE.DirectionalLight(0xffffff, 2.1);
+    headLight.position.set(1, 1, 1);
+    camera.add(ambientLight, headLight, headLight.target);
+
+    addStarField();
+
+    const lunarImagery = new XYZTilesOverlay({
+      url: IMAGERY_TEMPLATE,
+      projection: "EPSG:4326",
+      levels: 16,
+      tileDimension: 512,
+      opacity: 1,
+      preprocessURL: url => url.replace(
+        /lunar-fulleqc\/(\d+)\//,
+        (_, z) => `lunar-fulleqc/${Number(z) + 1}/`,
+      ),
+    });
+
+    const tiles = new TilesRenderer(TERRAIN_ROOT);
+    tiles.ellipsoid.name = "Moon";
+    tiles.ellipsoid.radius.set(MOON_RADIUS, MOON_RADIUS, MOON_RADIUS);
+    const quantizedMeshPlugin = new QuantizedMeshPlugin({
+      generateNormals: true,
+      smoothSkirtNormals: true,
+    });
+    // この配信元のlayer.jsonはslippyMap方式（y=0が北）。プラグインの
+    // 既定値は南起点なので、地形が南北反転しないよう明示的に合わせます。
+    quantizedMeshPlugin.tiling.flipY = true;
+    tiles.registerPlugin(quantizedMeshPlugin);
+    tiles.registerPlugin(new TilesFadePlugin());
+    tiles.registerPlugin(new ImageOverlayPlugin({
+      overlays: [lunarImagery],
+      resolution: 512,
+      enableTileSplitting: true,
+    }));
+    tiles.group.rotation.x = -Math.PI / 2;
+    scene.add(tiles.group);
+    tiles.group.updateMatrixWorld(true);
+
+    const controls = new GlobeControls(scene, camera, renderer.domElement, null);
+    controls.enableDamping = true;
+    // minAltitude / maxAltitude は距離ではなく、地平線に対するカメラ角度（radian）。
+    // 距離の制限には cameraRadius / minDistance を使います。
+    controls.minAltitude = 0;
+    controls.maxAltitude = Math.PI * 0.45;
+    controls.cameraRadius = 25;
+    controls.minDistance = 25;
+    controls.setEllipsoid(tiles.ellipsoid, tiles.group);
+
+    const markerGroup = new THREE.Group();
+    markerGroup.name = "Apollo landing markers";
+    markAsDemo(markerGroup);
+    tiles.group.add(markerGroup);
+
+    const baseFrame = new THREE.Group();
+    baseFrame.name = "Apollo 11 base demo";
+    markAsDemo(baseFrame);
+    tiles.group.add(baseFrame);
+
+    const routeGroup = new THREE.Group();
+    routeGroup.name = "Rover route demo";
+    markAsDemo(routeGroup);
+    baseFrame.add(routeGroup);
+
+    const analysisGroup = new THREE.Group();
+    analysisGroup.name = "Placeholder crater analysis";
+    analysisGroup.visible = false;
+    markAsDemo(analysisGroup);
+    baseFrame.add(analysisGroup);
+
+    createApolloMarkers();
+    createBaseDemo();
+    createRouteDemo();
+    createAnalysisDemo();
+    // GlobeControlsはscene全体をレイキャストするため、装飾物を除外しないと
+    // 遠いラベルや星を回転・ズームの基準点として拾ってしまいます。
+    disablePicking(markerGroup);
+    disablePicking(baseFrame);
+    updateBaseFrame(0);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.firstHitOnly = true;
+    const pointer = new THREE.Vector2();
+    const inverseMoonMatrix = new THREE.Matrix4();
+    const clock = new THREE.Clock();
+
+    tiles.addEventListener("load-tileset", () => {
+      setStatus("LOLA系Quantized Meshの定義を読み込みました");
+    });
+
+    tiles.addEventListener("tiles-load-end", () => {
+      if (tiles.visibleTiles.size > 0) finishInitialLoad();
+      snapBaseToTerrain();
+    });
+
+    tiles.addEventListener("load-error", event => {
+      state.loadErrors += 1;
+      if (state.loadErrors <= 2) {
+        console.warn("Moon tile load error", event.url || "overlay", event.error || event);
+      }
+    });
+
+    renderer.domElement.addEventListener("pointerdown", event => {
+      state.pointerDown = { x: event.clientX, y: event.clientY };
+      if (state.autoOrbit) toggleOrbit(false);
+    });
+
+    renderer.domElement.addEventListener("pointerup", event => {
+      if (!state.measuring || !state.pointerDown) return;
+      const moved = Math.hypot(event.clientX - state.pointerDown.x, event.clientY - state.pointerDown.y);
+      if (moved < 5) addMeasurePoint(event);
+    });
+
+    el("wholeButton").addEventListener("click", showWholeMoon);
+    el("apolloButton").addEventListener("click", showApollo);
+    el("southButton").addEventListener("click", showSouthPole);
+    el("orbitButton").addEventListener("click", () => toggleOrbit(!state.autoOrbit));
+    el("imageryButton").addEventListener("click", toggleImagery);
+    el("shadeButton").addEventListener("click", toggleShading);
+    el("markersButton").addEventListener("click", () => toggleGroup(markerGroup, el("markersButton"), "着陸地点"));
+    el("baseButton").addEventListener("click", () => toggleGroup(baseFrame, el("baseButton"), "基地デモ"));
+    el("routeButton").addEventListener("click", () => toggleGroup(routeGroup, el("routeButton"), "走行ルート"));
+    el("analysisButton").addEventListener("click", () => {
+      toggleGroup(analysisGroup, el("analysisButton"), "仮のクレーター解析");
+      if (analysisGroup.visible) showApollo();
+    });
+    el("measureButton").addEventListener("click", toggleMeasurement);
+    el("clearMeasureButton").addEventListener("click", clearMeasurement);
+    el("detailSlider").addEventListener("input", event => {
+      const value = Number(event.target.value);
+      tiles.errorTarget = value;
+      el("detailValue").value = String(value);
+      setStatus(`地形精細度を ${value} に変更しました（小さいほど高精細）`);
+    });
+
+    window.addEventListener("resize", resize);
+    window.addEventListener("error", event => showFatalError(event.error || event.message));
+    window.addEventListener("unhandledrejection", event => showFatalError(event.reason));
+
+    resize();
+    showWholeMoon();
+    renderer.setAnimationLoop(animate);
+
+    function animate() {
+      const delta = Math.min(clock.getDelta(), 0.05);
+
+      if (state.autoOrbit) {
+        tiles.group.rotation.z += delta * 0.045;
+        tiles.group.updateMatrixWorld(true);
+      }
+
+      controls.update();
+      camera.updateMatrixWorld();
+      tiles.setResolutionFromRenderer(camera, renderer);
+      tiles.setCamera(camera);
+      tiles.update();
+
+      if (!state.firstVisibleFrame && tiles.visibleTiles.size > 0) finishInitialLoad();
+      if (!state.baseHeight && performance.now() - state.lastSnapAttempt > 1500 && tiles.visibleTiles.size > 0) {
+        snapBaseToTerrain();
+      }
+
+      updateScreenSizedMarkers();
+      updateReadout();
+      updateStats();
+      renderer.render(scene, camera);
+    }
+
+    function resize() {
+      const width = Math.max(1, viewport.clientWidth);
+      const height = Math.max(1, viewport.clientHeight);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+
+    function setStatus(message) {
+      el("statusText").textContent = message;
+    }
+
+    function finishInitialLoad() {
+      state.firstVisibleFrame = true;
+      el("loading").classList.add("hidden");
+      el("statusDot").classList.add("ready");
+      setStatus("Three.jsで月面画像と3D地形を表示しています");
+    }
+
+    function showFatalError(error) {
+      const message = error instanceof Error ? error.message : String(error || "不明なエラー");
+      el("loading").classList.remove("hidden");
+      el("loadingTitle").textContent = "月面を表示できませんでした";
+      el("loadingMessage").textContent = `${message}。インターネット接続とブラウザーの開発者コンソールを確認してください。`;
+      el("statusDot").classList.add("error");
+      setStatus("読み込みエラーが発生しました");
+    }
+
+    function updateStats() {
+      const stats = tiles.stats;
+      el("tileStats").textContent =
+        `Queued: ${stats.queued} · Downloading: ${stats.downloading} · Loaded: ${stats.loaded} · Visible: ${tiles.visibleTiles.size}`;
+    }
+
+    function updateReadout() {
+      tiles.group.updateMatrixWorld(true);
+      inverseMoonMatrix.copy(tiles.group.matrixWorld).invert();
+      const local = camera.position.clone().applyMatrix4(inverseMoonMatrix);
+      const cartographic = tiles.ellipsoid.getPositionToCartographic(local, {});
+      el("cameraLon").textContent = `${THREE.MathUtils.radToDeg(cartographic.lon).toFixed(4)}°`;
+      el("cameraLat").textContent = `${THREE.MathUtils.radToDeg(cartographic.lat).toFixed(4)}°`;
+      el("cameraAlt").textContent = formatDistance(Math.max(0, cartographic.height));
+      el("cameraDistance").textContent = formatDistance(camera.position.length());
+    }
+
+    function setCameraView({ lon, lat, altitude, east = 0, north = 0 }) {
+      toggleOrbit(false);
+      tiles.group.rotation.z = 0;
+      tiles.group.updateMatrixWorld(true);
+
+      const latRad = lat * DEG;
+      const lonRad = lon * DEG;
+      const targetLocal = tiles.ellipsoid.getCartographicToPosition(latRad, lonRad, 0, new THREE.Vector3());
+      const eyeLocal = tiles.ellipsoid.getCartographicToPosition(latRad, lonRad, altitude, new THREE.Vector3());
+      const enu = tiles.ellipsoid.getEastNorthUpFrame(latRad, lonRad, 0, new THREE.Matrix4());
+      const eastAxis = new THREE.Vector3().setFromMatrixColumn(enu, 0);
+      const northAxis = new THREE.Vector3().setFromMatrixColumn(enu, 1);
+      eyeLocal.addScaledVector(eastAxis, east).addScaledVector(northAxis, north);
+
+      const targetWorld = targetLocal.applyMatrix4(tiles.group.matrixWorld);
+      const eyeWorld = eyeLocal.applyMatrix4(tiles.group.matrixWorld);
+      const northWorld = northAxis.transformDirection(tiles.group.matrixWorld);
+
+      camera.position.copy(eyeWorld);
+      camera.up.copy(northWorld);
+      camera.lookAt(targetWorld);
+      camera.updateMatrixWorld(true);
+      controls.pivotPoint.copy(targetWorld);
+      controls.resetState();
+    }
+
+    function showWholeMoon() {
+      setCameraView({ lon: -18, lat: 14, altitude: 4_650_000 });
+      setStatus("月全体を表示しています");
+    }
+
+    function showApollo() {
+      setCameraView({
+        lon: APOLLO_11.lon,
+        lat: APOLLO_11.lat,
+        altitude: 7_500,
+        east: -4_000,
+        north: -5_000,
+      });
+      setStatus("Apollo 11周辺の仮設基地を表示しています");
+    }
+
+    function showSouthPole() {
+      setCameraView({ lon: 0, lat: -89.2, altitude: 290_000, east: -90_000, north: -110_000 });
+      setStatus("月の南極域を表示しています");
+    }
+
+    function toggleOrbit(value) {
+      state.autoOrbit = value;
+      el("orbitButton").classList.toggle("active", value);
+      if (value) setStatus("月を自動周回しています");
+    }
+
+    function toggleImagery() {
+      state.imageryVisible = !state.imageryVisible;
+      lunarImagery.opacity = state.imageryVisible ? 1 : 0;
+      lunarImagery.needsUpdate = true;
+      el("imageryButton").classList.toggle("active", state.imageryVisible);
+      setStatus(state.imageryVisible ? "LROC月面画像を表示しました" : "LROC画像を隠し、地形メッシュだけを表示します");
+    }
+
+    function toggleShading() {
+      state.shaded = !state.shaded;
+      headLight.intensity = state.shaded ? 2.1 : 0;
+      ambientLight.intensity = state.shaded ? 0.42 : 1.25;
+      el("shadeButton").classList.toggle("active", state.shaded);
+      setStatus(state.shaded ? "地形の陰影を有効にしました" : "均一な照明に切り替えました");
+    }
+
+    function toggleGroup(group, button, label) {
+      group.visible = !group.visible;
+      button.classList.toggle("active", group.visible);
+      setStatus(`${label}を${group.visible ? "表示" : "非表示に"}しました`);
+    }
+
+    function createApolloMarkers() {
+      const missions = [
+        ["Apollo 11", 23.47297, 0.67408, 0x60a5fa],
+        ["Apollo 12", -23.42157, -3.01239, 0xa78bfa],
+        ["Apollo 14", -17.47139, -3.64544, 0xa78bfa],
+        ["Apollo 15", 3.62981, 26.13224, 0x34d399],
+        ["Apollo 16", 15.50019, -8.97301, 0xfbbf24],
+        ["Apollo 17", 30.77168, 20.19080, 0xfb7185],
+      ];
+
+      for (const [name, lon, lat, color] of missions) {
+        const group = new THREE.Group();
+        const position = moonPosition(lon, lat, 4_000);
+        const normal = position.clone().normalize();
+        group.position.copy(position);
+
+        const pin = new THREE.Mesh(
+          new THREE.ConeGeometry(1, 4, 10),
+          new THREE.MeshBasicMaterial({ color, depthTest: false }),
+        );
+        pin.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        pin.renderOrder = 8;
+        group.add(pin);
+
+        const label = makeLabelSprite(name, color);
+        label.position.copy(normal).multiplyScalar(3.4);
+        label.userData.screenScale = 0.032;
+        label.renderOrder = 9;
+        group.add(label);
+        group.userData.screenPin = pin;
+        group.userData.screenScale = 0.009;
+        markerGroup.add(group);
+      }
+    }
+
+    function createBaseDemo() {
+      const regolith = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.82, metalness: 0.12 });
+      const white = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.55, metalness: 0.3 });
+      const gold = new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.42, metalness: 0.66 });
+      const solar = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, emissive: 0x071d5b, roughness: 0.3, metalness: 0.48 });
+
+      const habitat = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 28, 20), white);
+      habitat.rotation.x = Math.PI / 2;
+      habitat.position.set(0, 0, 10);
+      baseFrame.add(habitat);
+
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(15, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshPhysicalMaterial({
+          color: 0x93c5fd,
+          transparent: true,
+          opacity: 0.34,
+          roughness: 0.15,
+          metalness: 0.08,
+          side: THREE.DoubleSide,
+        }),
+      );
+      dome.rotation.x = Math.PI / 2;
+      dome.position.set(34, 6, 0.5);
+      baseFrame.add(dome);
+
+      const landerBody = new THREE.Mesh(new THREE.BoxGeometry(12, 12, 7), gold);
+      landerBody.position.set(-32, 10, 11);
+      baseFrame.add(landerBody);
+
+      for (const [x, y] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 13, 8), regolith);
+        leg.rotation.x = Math.PI / 2;
+        leg.position.set(-32 + x, 10 + y, 5);
+        baseFrame.add(leg);
+      }
+
+      for (const y of [-28, -16, 30, 42]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(32, 8, 0.8), solar);
+        panel.position.set(20, y, 2.2);
+        baseFrame.add(panel);
+      }
+
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.2, 24, 10), white);
+      mast.rotation.x = Math.PI / 2;
+      mast.position.set(2, 31, 12);
+      baseFrame.add(mast);
+
+      const beacon = new THREE.PointLight(0x60a5fa, 26, 180, 2);
+      beacon.position.set(2, 31, 27);
+      baseFrame.add(beacon);
+    }
+
+    function createRouteDemo() {
+      const points = [
+        new THREE.Vector3(-24, 8, 2.5),
+        new THREE.Vector3(-3, 20, 2.5),
+        new THREE.Vector3(22, 13, 2.5),
+        new THREE.Vector3(48, -4, 2.5),
+        new THREE.Vector3(70, 18, 2.5),
+      ];
+      const curve = new THREE.CatmullRomCurve3(points);
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(curve.getPoints(80)),
+        new THREE.LineBasicMaterial({ color: 0x34d399, depthTest: false }),
+      );
+      line.renderOrder = 6;
+      routeGroup.add(line);
+
+      for (const point of points) {
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(2.1, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0x6ee7b7, depthTest: false }),
+        );
+        marker.position.copy(point);
+        marker.renderOrder = 7;
+        routeGroup.add(marker);
+      }
+    }
+
+    function createAnalysisDemo() {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xfb7185,
+        transparent: true,
+        opacity: 0.86,
+        side: THREE.DoubleSide,
+        depthTest: false,
+      });
+      for (const [x, y, radius] of [[58, 32, 8], [86, -14, 12], [-60, -34, 10]]) {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.8, radius, 40), material);
+        ring.position.set(x, y, 3.4);
+        ring.renderOrder = 8;
+        analysisGroup.add(ring);
+      }
+    }
+
+    function updateBaseFrame(height) {
+      state.baseHeight = height;
+      const matrix = tiles.ellipsoid.getEastNorthUpFrame(
+        APOLLO_11.lat * DEG,
+        APOLLO_11.lon * DEG,
+        height + 2,
+        new THREE.Matrix4(),
+      );
+      baseFrame.matrixAutoUpdate = false;
+      baseFrame.matrix.copy(matrix);
+      baseFrame.matrixWorldNeedsUpdate = true;
+    }
+
+    function snapBaseToTerrain() {
+      state.lastSnapAttempt = performance.now();
+      tiles.group.updateMatrixWorld(true);
+      const originLocal = moonPosition(APOLLO_11.lon, APOLLO_11.lat, 80_000);
+      const targetLocal = moonPosition(APOLLO_11.lon, APOLLO_11.lat, -5_000);
+      const originWorld = originLocal.applyMatrix4(tiles.group.matrixWorld);
+      const targetWorld = targetLocal.applyMatrix4(tiles.group.matrixWorld);
+      const direction = targetWorld.clone().sub(originWorld).normalize();
+
+      const visibilities = [markerGroup.visible, baseFrame.visible];
+      markerGroup.visible = false;
+      baseFrame.visible = false;
+      raycaster.set(originWorld, direction);
+      raycaster.near = 0;
+      raycaster.far = 120_000;
+      const hit = raycaster.intersectObject(tiles.group, true).find(item => !hasDemoAncestor(item.object));
+      markerGroup.visible = visibilities[0];
+      baseFrame.visible = visibilities[1];
+
+      if (hit) {
+        const local = tiles.group.worldToLocal(hit.point.clone());
+        const cartographic = tiles.ellipsoid.getPositionToCartographic(local, {});
+        updateBaseFrame(cartographic.height);
+      }
+    }
+
+    function moonPosition(lon, lat, height = 0) {
+      return tiles.ellipsoid.getCartographicToPosition(lat * DEG, lon * DEG, height, new THREE.Vector3());
+    }
+
+    function makeLabelSprite(text, color) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 128;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "rgba(5, 10, 18, 0.78)";
+      context.strokeStyle = `#${new THREE.Color(color).getHexString()}`;
+      context.lineWidth = 5;
+      roundedRect(context, 7, 7, 498, 114, 24);
+      context.fill();
+      context.stroke();
+      context.fillStyle = "#ffffff";
+      context.font = "600 48px system-ui, sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(text, 256, 66);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+      sprite.scale.set(4, 1, 1);
+      return sprite;
+    }
+
+    function roundedRect(context, x, y, width, height, radius) {
+      context.beginPath();
+      context.roundRect(x, y, width, height, radius);
+    }
+
+    function updateScreenSizedMarkers() {
+      markerGroup.children.forEach(group => {
+        const worldPosition = group.getWorldPosition(new THREE.Vector3());
+        const distance = camera.position.distanceTo(worldPosition);
+        const pinScale = Math.max(80, distance * group.userData.screenScale);
+        group.userData.screenPin.scale.setScalar(pinScale);
+        const sprite = group.children.find(child => child.isSprite);
+        if (sprite) {
+          const labelHeight = Math.max(180, distance * sprite.userData.screenScale);
+          sprite.scale.set(labelHeight * 4, labelHeight, 1);
+          sprite.position.copy(group.position.clone().normalize()).multiplyScalar(pinScale * 3.1);
+        }
+      });
+    }
+
+    function toggleMeasurement() {
+      state.measuring = !state.measuring;
+      el("measureButton").classList.toggle("active", state.measuring);
+      renderer.domElement.style.cursor = state.measuring ? "crosshair" : "grab";
+      el("measureResult").textContent = state.measuring ? "1点目をクリックしてください" : "地表上の2点を選択します";
+      setStatus(state.measuring ? "距離計測モードです" : "距離計測を終了しました");
+    }
+
+    function addMeasurePoint(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObject(tiles.group, true).find(item => !hasDemoAncestor(item.object));
+      if (!hit) {
+        el("measureResult").textContent = "地形を選択できませんでした";
+        return;
+      }
+
+      const point = hit.point.clone();
+      state.measurePoints.push(point);
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(95, 14, 10),
+        new THREE.MeshBasicMaterial({ color: 0xfbbf24, depthTest: false }),
+      );
+      dot.position.copy(point);
+      dot.renderOrder = 20;
+      dot.raycast = () => {};
+      scene.add(dot);
+      state.measureObjects.push(dot);
+
+      if (state.measurePoints.length === 1) {
+        el("measureResult").textContent = "2点目をクリックしてください";
+        return;
+      }
+
+      const [a, b] = state.measurePoints.slice(-2);
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([a, b]),
+        new THREE.LineBasicMaterial({ color: 0xfbbf24, depthTest: false }),
+      );
+      line.renderOrder = 19;
+      line.raycast = () => {};
+      scene.add(line);
+      state.measureObjects.push(line);
+
+      inverseMoonMatrix.copy(tiles.group.matrixWorld).invert();
+      const ca = tiles.ellipsoid.getPositionToCartographic(a.clone().applyMatrix4(inverseMoonMatrix), {});
+      const cb = tiles.ellipsoid.getPositionToCartographic(b.clone().applyMatrix4(inverseMoonMatrix), {});
+      const distance = greatCircleDistance(ca.lat, ca.lon, cb.lat, cb.lon);
+      el("measureResult").textContent = `月面距離: ${formatDistance(distance)}`;
+      state.measuring = false;
+      el("measureButton").classList.remove("active");
+      renderer.domElement.style.cursor = "grab";
+      setStatus(`2点間の月面距離は ${formatDistance(distance)} です`);
+    }
+
+    function clearMeasurement() {
+      state.measureObjects.forEach(object => {
+        scene.remove(object);
+        object.geometry?.dispose();
+        object.material?.dispose();
+      });
+      state.measureObjects.length = 0;
+      state.measurePoints.length = 0;
+      el("measureResult").textContent = "地表上の2点を選択します";
+      setStatus("計測結果を消去しました");
+    }
+
+    function greatCircleDistance(lat1, lon1, lat2, lon2) {
+      const dLat = lat2 - lat1;
+      const dLon = lon2 - lon1;
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+      return 2 * MOON_RADIUS * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
+
+    function formatDistance(metres) {
+      if (metres >= 1_000_000) return `${(metres / 1_000_000).toFixed(2)} Mm`;
+      if (metres >= 1_000) return `${(metres / 1_000).toFixed(2)} km`;
+      return `${metres.toFixed(1)} m`;
+    }
+
+    function markAsDemo(object) {
+      object.userData.demoObject = true;
+    }
+
+    function disablePicking(root) {
+      root.traverse(object => {
+        if (typeof object.raycast === "function") object.raycast = () => {};
+      });
+    }
+
+    function hasDemoAncestor(object) {
+      let current = object;
+      while (current) {
+        if (current.userData?.demoObject) return true;
+        current = current.parent;
+      }
+      return false;
+    }
+
+    function addStarField() {
+      const count = 1700;
+      const positions = new Float32Array(count * 3);
+      for (let i = 0; i < count; i += 1) {
+        const radius = 11_000_000 + Math.random() * 3_000_000;
+        const z = Math.random() * 2 - 1;
+        const angle = Math.random() * Math.PI * 2;
+        const radial = Math.sqrt(1 - z * z);
+        positions[i * 3] = radius * radial * Math.cos(angle);
+        positions[i * 3 + 1] = radius * radial * Math.sin(angle);
+        positions[i * 3 + 2] = radius * z;
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({ color: 0xcbd5e1, size: 3200, sizeAttenuation: true });
+      const stars = new THREE.Points(geometry, material);
+      stars.frustumCulled = false;
+      stars.raycast = () => {};
+      scene.add(stars);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1277 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Standalone Moon Lab</title>
+  <meta name="description" content="Django、npm、Cesium ionを使わずに開ける単体月面3Dビューア">
+
+  <!-- CesiumJS本体はCDNから取得します。ローカルにはこのHTMLだけを置けば動きます。 -->
+  <script>
+    window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/";
+  </script>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css">
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(13, 18, 29, 0.94);
+      --panel-soft: rgba(20, 28, 43, 0.82);
+      --line: rgba(148, 163, 184, 0.22);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --blue: #60a5fa;
+      --blue-strong: #2563eb;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+      --sidebar: 322px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #020617;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    #cesiumContainer {
+      position: fixed;
+      inset: 0 0 0 var(--sidebar);
+      background: #000;
+    }
+
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 20;
+      width: var(--sidebar);
+      padding: 18px;
+      overflow-y: auto;
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.20), transparent 32%),
+        linear-gradient(180deg, #101827 0%, #070b13 100%);
+      border-right: 1px solid var(--line);
+      box-shadow: 18px 0 45px rgba(0, 0, 0, 0.32);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border: 1px solid rgba(191, 219, 254, 0.35);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 32%, #f8fafc 0 4%, transparent 5%),
+        radial-gradient(circle at 62% 58%, #64748b 0 8%, transparent 9%),
+        radial-gradient(circle at 50% 50%, #cbd5e1, #64748b 68%, #334155 100%);
+      box-shadow: 0 0 28px rgba(148, 163, 184, 0.18);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+    }
+
+    .subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .connection-note {
+      margin: 0 0 14px;
+      padding: 9px 10px;
+      border: 1px solid rgba(96, 165, 250, 0.28);
+      border-radius: 10px;
+      background: rgba(37, 99, 235, 0.08);
+      color: #bfdbfe;
+      font-size: 0.72rem;
+      line-height: 1.45;
+    }
+
+    .section {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--panel-soft);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 10px;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 10px currentColor;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .button-grid.single { grid-template-columns: 1fr; }
+
+    .control {
+      min-height: 38px;
+      padding: 8px 9px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 9px;
+      background: rgba(30, 41, 59, 0.82);
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 650;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    .control:hover {
+      border-color: rgba(96, 165, 250, 0.68);
+      background: rgba(37, 99, 235, 0.22);
+      transform: translateY(-1px);
+    }
+
+    .control:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    .control.active {
+      border-color: rgba(52, 211, 153, 0.72);
+      background: rgba(5, 150, 105, 0.24);
+      color: #d1fae5;
+    }
+
+    .control.warning.active {
+      border-color: rgba(251, 191, 36, 0.78);
+      background: rgba(217, 119, 6, 0.24);
+      color: #fef3c7;
+    }
+
+    .readout {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 10px;
+      margin: 0;
+      font-size: 0.72rem;
+    }
+
+    .readout dt { color: var(--muted); }
+    .readout dd {
+      margin: 0;
+      color: #e2e8f0;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .feature-list {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .feature-list li {
+      display: grid;
+      grid-template-columns: 9px 1fr;
+      gap: 8px;
+      color: #cbd5e1;
+      font-size: 0.71rem;
+      line-height: 1.35;
+    }
+
+    .feature-list li::before {
+      width: 7px;
+      height: 7px;
+      margin-top: 3px;
+      border-radius: 50%;
+      background: var(--blue);
+      content: "";
+    }
+
+    .hud {
+      position: fixed;
+      z-index: 10;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(12px);
+      font-size: 0.72rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .badge::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 9px rgba(52, 211, 153, 0.75);
+      content: "";
+    }
+
+    .selection-card {
+      position: fixed;
+      z-index: 10;
+      right: 16px;
+      bottom: 54px;
+      width: min(330px, calc(100vw - var(--sidebar) - 32px));
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
+      backdrop-filter: blur(12px);
+    }
+
+    .selection-card strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #e0f2fe;
+      font-size: 0.82rem;
+    }
+
+    .selection-card span {
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.45;
+    }
+
+    .statusbar {
+      position: fixed;
+      z-index: 11;
+      right: 0;
+      bottom: 0;
+      left: var(--sidebar);
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 16px;
+      border-top: 1px solid var(--line);
+      background: rgba(5, 9, 16, 0.90);
+      color: #cbd5e1;
+      backdrop-filter: blur(10px);
+      font-size: 0.72rem;
+    }
+
+    #statusText { color: #dbeafe; }
+    .shortcut { color: #64748b; }
+
+    .loading {
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: #020617;
+      transition: opacity 300ms ease;
+    }
+
+    .loading.hidden {
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .loading-inner {
+      width: min(390px, calc(100vw - 40px));
+      text-align: center;
+    }
+
+    .moon-loader {
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 16px;
+      border: 1px solid #64748b;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #f8fafc, #64748b 70%, #1e293b);
+      box-shadow: 0 0 45px rgba(148, 163, 184, 0.30);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      50% { transform: scale(0.94); opacity: 0.72; }
+    }
+
+    .loading p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .mobile-toggle { display: none; }
+
+    .cesium-viewer-bottom { bottom: 42px; }
+
+    @media (max-width: 820px) {
+      :root { --sidebar: 0px; }
+
+      #cesiumContainer { inset: 0; }
+
+      .sidebar {
+        width: min(322px, calc(100vw - 44px));
+        transform: translateX(-105%);
+        transition: transform 180ms ease;
+      }
+
+      .sidebar.open { transform: translateX(0); }
+
+      .mobile-toggle {
+        position: fixed;
+        z-index: 31;
+        top: 14px;
+        left: 14px;
+        display: block;
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        color: white;
+        cursor: pointer;
+      }
+
+      .hud { top: 14px; right: 12px; }
+      .statusbar { left: 0; }
+      .selection-card { width: calc(100vw - 24px); right: 12px; bottom: 52px; }
+      .shortcut { display: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <aside class="sidebar" id="sidebar" aria-label="月面ビューア操作パネル">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1>Standalone Moon Lab</h1>
+        <p class="subtitle">1 HTML · No npm · No Cesium ion</p>
+      </div>
+    </div>
+
+    <p class="connection-note">
+      HTMLは1ファイルです。Cesium Workerのため、file://ではなく python3 -m http.server で開いてください。月面データの取得にはインターネット接続が必要です。
+    </p>
+
+    <section class="section">
+      <h2 class="section-title">Camera <span class="status-dot"></span></h2>
+      <div class="button-grid">
+        <button class="control" id="homeButton">月全体</button>
+        <button class="control" id="apolloButton">Apollo 11</button>
+        <button class="control" id="poleButton">南極域</button>
+        <button class="control" id="orbitButton">自動周回</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">3D layers</h2>
+      <div class="button-grid">
+        <button class="control active" id="terrainButton">3D地形</button>
+        <button class="control active" id="lightingButton" title="カメラ側から照らして地形の凹凸を見やすくします">陰影</button>
+        <button class="control active" id="baseButton">基地デモ</button>
+        <button class="control active" id="sitesButton">着陸地点</button>
+        <button class="control active" id="routeButton">走行ルート</button>
+        <button class="control warning active" id="analysisButton">仮解析</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Measurement</h2>
+      <div class="button-grid">
+        <button class="control" id="measureButton">距離を計測</button>
+        <button class="control" id="clearMeasureButton">計測を消去</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Camera pose</h2>
+      <dl class="readout">
+        <dt>経度</dt><dd id="cameraLon">--</dd>
+        <dt>緯度</dt><dd id="cameraLat">--</dd>
+        <dt>高度</dt><dd id="cameraAlt">--</dd>
+        <dt>方位</dt><dd id="cameraHeading">--</dd>
+        <dt>ピッチ</dt><dd id="cameraPitch">--</dd>
+      </dl>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">このデモで表示するもの</h2>
+      <ul class="feature-list">
+        <li>LROC公開タイルによる月面画像</li>
+        <li>LOLA系Quantized Meshによる起伏</li>
+        <li>Apollo着陸地点の3Dマーカー</li>
+        <li>ローバー・着陸船・居住棟の簡易3D形状</li>
+        <li>Waypointとローバー走行ルート</li>
+        <li>AI解析の代わりとなる仮のクレーター検出</li>
+        <li>月半径を使った2点間距離計測</li>
+      </ul>
+    </section>
+  </aside>
+
+  <button class="mobile-toggle" id="mobileToggle" aria-label="操作パネルを開閉">☰</button>
+
+  <main id="cesiumContainer" aria-label="3D月面"></main>
+
+  <div class="hud" aria-live="polite">
+    <span class="badge">LOCAL DEMO</span>
+    <span id="terrainBadge">Terrain: 読込中</span>
+  </div>
+
+  <div class="selection-card" aria-live="polite">
+    <strong id="selectionTitle">月面を操作できます</strong>
+    <span id="selectionBody">左ドラッグで回転、右ドラッグでズーム。マーカーや3D形状をクリックすると説明を表示します。</span>
+  </div>
+
+  <div class="statusbar">
+    <span id="statusText">月面ビューアを準備しています…</span>
+    <span class="shortcut">H: 月全体 · B: 基地 · R: ルート · A: 仮解析 · M: 計測 · O: 周回</span>
+  </div>
+
+  <div class="loading" id="loadingOverlay">
+    <div class="loading-inner">
+      <div class="moon-loader"></div>
+      <strong>月面3Dビューアを初期化しています</strong>
+      <p id="loadingText">CesiumJSを準備中…</p>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      if (window.location.protocol === "file:") {
+        document.getElementById("loadingText").textContent =
+          "file://ではCesium Workerを起動できません。このフォルダで python3 -m http.server 8000 を実行し、http://127.0.0.1:8000/standalone_moon_viewer.html を開いてください。";
+        document.getElementById("statusText").textContent =
+          "ローカルHTTPサーバーから開いてください";
+        return;
+      }
+
+      if (typeof Cesium === "undefined") {
+        document.getElementById("loadingText").textContent =
+          "CesiumJSを読み込めません。インターネット接続を確認してください。";
+        return;
+      }
+
+      const MOON = Cesium.Ellipsoid.MOON;
+      const APOLLO_11 = { lon: 23.47297, lat: 0.67408, name: "Apollo 11" };
+      const MOON_RADIUS = 1737400;
+
+      const state = {
+        terrainProvider: null,
+        apolloTerrainHeight: 0,
+        terrainEnabled: true,
+        lightingEnabled: true,
+        orbiting: false,
+        orbitHeading: 0,
+        measuring: false,
+        measurePositions: [],
+        demoEntities: [],
+        siteEntities: [],
+        routeEntities: [],
+        analysisEntities: [],
+        measurementEntities: []
+      };
+
+      const el = (id) => document.getElementById(id);
+      const setStatus = (message) => { el("statusText").textContent = message; };
+      const setSelection = (title, body) => {
+        el("selectionTitle").textContent = title;
+        el("selectionBody").textContent = body;
+      };
+
+      const smoothTerrain = () => new Cesium.EllipsoidTerrainProvider({ ellipsoid: MOON });
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        animation: false,
+        baseLayerPicker: false,
+        baseLayer: false,
+        fullscreenButton: false,
+        geocoder: false,
+        globe: new Cesium.Globe(MOON),
+        homeButton: false,
+        infoBox: false,
+        mapProjection: new Cesium.GeographicProjection(MOON),
+        navigationHelpButton: false,
+        sceneModePicker: false,
+        selectionIndicator: false,
+        skyAtmosphere: false,
+        terrainProvider: smoothTerrain(),
+        timeline: false
+      });
+
+      // Cesium's default SunLight is tied to Earth-fixed time. This demo uses a
+      // Moon-sized ellipsoid at the Earth coordinate origin, so that light can
+      // leave the entire camera-facing hemisphere black. A camera-following
+      // directional light keeps the standalone demo visible at every time of day.
+      const headlight = new Cesium.DirectionalLight({
+        direction: Cesium.Cartesian3.clone(viewer.camera.directionWC),
+        color: Cesium.Color.WHITE,
+        intensity: 1.25
+      });
+      viewer.scene.light = headlight;
+
+      function updateHeadlight() {
+        if (!state.lightingEnabled) return;
+        Cesium.Cartesian3.clone(viewer.camera.directionWC, headlight.direction);
+      }
+
+      viewer.scene.preRender.addEventListener(updateHeadlight);
+      viewer.scene.backgroundColor = Cesium.Color.BLACK;
+      viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#777b83");
+      viewer.scene.globe.enableLighting = true;
+      viewer.scene.globe.depthTestAgainstTerrain = false;
+      viewer.scene.fog.enabled = false;
+      viewer.scene.highDynamicRange = false;
+      if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+      if (viewer.scene.moon) viewer.scene.moon.show = false;
+
+      function seededRandom(seed) {
+        let value = seed >>> 0;
+        return () => {
+          value = (value * 1664525 + 1013904223) >>> 0;
+          return value / 4294967296;
+        };
+      }
+
+      function createProceduralMoonTexture() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1600;
+        canvas.height = 800;
+        const ctx = canvas.getContext("2d");
+        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "#b5b8bd");
+        gradient.addColorStop(0.48, "#85898f");
+        gradient.addColorStop(1, "#a7a9ad");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const random = seededRandom(19690720);
+        for (let i = 0; i < 420; i += 1) {
+          const x = random() * canvas.width;
+          const y = random() * canvas.height;
+          const radius = 2 + Math.pow(random(), 2.7) * 62;
+          const shade = Math.floor(70 + random() * 70);
+          const crater = ctx.createRadialGradient(
+            x - radius * 0.25, y - radius * 0.28, radius * 0.08,
+            x, y, radius
+          );
+          crater.addColorStop(0, `rgba(${shade + 70},${shade + 70},${shade + 72},0.65)`);
+          crater.addColorStop(0.28, `rgba(${shade},${shade},${shade + 3},0.48)`);
+          crater.addColorStop(0.72, `rgba(${shade + 30},${shade + 30},${shade + 31},0.24)`);
+          crater.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = crater;
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        return canvas.toDataURL("image/jpeg", 0.86);
+      }
+
+      function addImagery() {
+        const fallback = new Cesium.SingleTileImageryProvider({
+          url: createProceduralMoonTexture(),
+          rectangle: Cesium.Rectangle.MAX_VALUE,
+          credit: "Procedural offline fallback"
+        });
+        viewer.imageryLayers.addImageryProvider(fallback);
+
+        const lroc = new Cesium.UrlTemplateImageryProvider({
+          // QuickMap's equirectangular pyramid starts with one 512 px world
+          // tile at z=0, while Cesium's GeographicTilingScheme starts with
+          // two tiles at level 0. Therefore QuickMap z is Cesium level + 1.
+          // Using {z} directly makes Cesium request non-existent southern
+          // rows, producing a black lower hemisphere and stretched imagery.
+          url: "https://lroc-tiles.quickmap.io/tiles/wac_nac_nacroi/lunar-fulleqc/{quickmapZ}/{x}/{y}.jpg",
+          customTags: {
+            quickmapZ: (_imageryProvider, _x, _y, level) => level + 1
+          },
+          credit: new Cesium.Credit("NASA/GSFC/Arizona State University — LROC QuickMap", true),
+          minimumLevel: 0,
+          maximumLevel: 14,
+          tilingScheme: new Cesium.GeographicTilingScheme({
+            numberOfLevelZeroTilesX: 2,
+            numberOfLevelZeroTilesY: 1,
+            ellipsoid: MOON
+          }),
+          rectangle: Cesium.Rectangle.fromDegrees(-180, -90, 180, 90),
+          tileWidth: 512,
+          tileHeight: 512,
+          hasAlphaChannel: false
+        });
+
+        const lrocLayer = viewer.imageryLayers.addImageryProvider(lroc);
+        lrocLayer.alpha = 1.0;
+        lroc.errorEvent.addEventListener(() => {
+          el("terrainBadge").textContent = "Imagery: 代替テクスチャ";
+        });
+      }
+
+      async function loadTerrain() {
+        el("loadingText").textContent = "公開月面標高を読み込み中…";
+        try {
+          state.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(
+            "https://dem-tiles.b-cdn.net/lunar/qts_demstack/lunar-fulleqc",
+            {
+              ellipsoid: MOON,
+              requestVertexNormals: true,
+              requestWaterMask: false,
+              requestMetadata: false
+            }
+          );
+          try {
+            const samples = await Cesium.sampleTerrainMostDetailed(
+              state.terrainProvider,
+              [Cesium.Cartographic.fromDegrees(APOLLO_11.lon, APOLLO_11.lat)]
+            );
+            if (Number.isFinite(samples[0]?.height)) {
+              state.apolloTerrainHeight = samples[0].height;
+            }
+          } catch (sampleError) {
+            console.warn("Apollo 11 terrain sampling unavailable.", sampleError);
+          }
+          if (state.terrainEnabled) viewer.terrainProvider = state.terrainProvider;
+          el("terrainBadge").textContent = "Terrain: LOLA DEM";
+          setStatus("公開月面画像と3D地形を表示しています");
+        } catch (error) {
+          console.warn("Terrain unavailable; using smooth Moon.", error);
+          viewer.terrainProvider = smoothTerrain();
+          state.terrainProvider = null;
+          el("terrainBadge").textContent = "Terrain: 滑らかな月球";
+          setStatus("標高データを取得できないため、滑らかな月球で表示しています");
+        }
+      }
+
+      function moonPosition(lon, lat, height = 0) {
+        return Cesium.Cartesian3.fromDegrees(lon, lat, height, MOON);
+      }
+
+      function addLandingSites() {
+        const sites = [
+          ["Apollo 11", 23.47297, 0.67408, "1969年、人類初の有人月面着陸地点"],
+          ["Apollo 12", -23.42157, -3.01239, "Surveyor 3付近への精密着陸"],
+          ["Apollo 14", -17.47139, -3.64544, "Fra Mauro高地の探査"],
+          ["Apollo 15", 3.62981, 26.13224, "月面車を初めて使用"],
+          ["Apollo 16", 15.50019, -8.97301, "Descartes高地の探査"],
+          ["Apollo 17", 30.77168, 20.19080, "最後のApollo有人月面着陸" ]
+        ];
+
+        sites.forEach(([name, lon, lat, description]) => {
+          const entity = viewer.entities.add({
+            name,
+            position: moonPosition(lon, lat),
+            point: {
+              pixelSize: 11,
+              color: Cesium.Color.fromCssColorString("#60a5fa"),
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 2,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            label: {
+              text: name,
+              font: "600 13px sans-serif",
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -20),
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 6000000)
+            },
+            properties: {
+              category: "Apollo着陸地点",
+              detail: description
+            }
+          });
+          state.siteEntities.push(entity);
+        });
+      }
+
+      function orientationAt(position, heading = 0, pitch = 0, roll = 0) {
+        return Cesium.Transforms.headingPitchRollQuaternion(
+          position,
+          new Cesium.HeadingPitchRoll(heading, pitch, roll),
+          MOON
+        );
+      }
+
+      function addBox(name, lon, lat, height, dimensions, color, detail, heading = 0) {
+        const position = moonPosition(lon, lat, height);
+        const entity = viewer.entities.add({
+          name,
+          position,
+          orientation: orientationAt(position, heading),
+          box: {
+            dimensions,
+            material: color,
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString("#0f172a"),
+            heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+          },
+          properties: { category: "簡易3Dモデル", detail }
+        });
+        state.demoEntities.push(entity);
+        return entity;
+      }
+
+      function addCylinder(name, lon, lat, height, length, radius, color, detail) {
+        const position = moonPosition(lon, lat, height);
+        const entity = viewer.entities.add({
+          name,
+          position,
+          cylinder: {
+            length,
+            topRadius: radius * 0.72,
+            bottomRadius: radius,
+            material: color,
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString("#0f172a"),
+            heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+          },
+          properties: { category: "簡易3Dモデル", detail }
+        });
+        state.demoEntities.push(entity);
+        return entity;
+      }
+
+      function addDemoBase() {
+        const lon = APOLLO_11.lon;
+        const lat = APOLLO_11.lat;
+
+        addCylinder(
+          "月着陸船（仮モデル）", lon, lat, 4.0, 8, 4.2,
+          Cesium.Color.fromCssColorString("#cbd5e1"),
+          "元ファイルの3Dモデル読込機能を、外部ファイル不要の円柱形状で代替しています。"
+        );
+
+        addCylinder(
+          "居住モジュール（仮モデル）", lon + 0.00055, lat + 0.00018, 3.2, 6.4, 6.0,
+          Cesium.Color.fromCssColorString("#e2e8f0"),
+          "月面基地の配置を確認するための仮の居住棟です。"
+        );
+
+        addBox(
+          "ソーラーパネルA", lon + 0.00018, lat + 0.00052, 0.45,
+          new Cesium.Cartesian3(18, 6, 0.9),
+          Cesium.Color.fromCssColorString("#1d4ed8"),
+          "平面状のBoxで作った簡易ソーラーパネルです。",
+          Cesium.Math.toRadians(12)
+        );
+
+        addBox(
+          "ソーラーパネルB", lon + 0.00018, lat + 0.00076, 0.45,
+          new Cesium.Cartesian3(18, 6, 0.9),
+          Cesium.Color.fromCssColorString("#2563eb"),
+          "外部GLBモデルを使わず、Cesiumの基本図形だけで表示しています。",
+          Cesium.Math.toRadians(12)
+        );
+
+        addBox(
+          "月面ローバー（仮モデル）", lon - 0.00034, lat + 0.00008, 1.6,
+          new Cesium.Cartesian3(4.8, 2.8, 2.0),
+          Cesium.Color.fromCssColorString("#fbbf24"),
+          "元ファイルのモデル配置機能を示す、外部モデル不要の仮ローバーです。",
+          Cesium.Math.toRadians(28)
+        );
+
+        const label = viewer.entities.add({
+          name: "Standalone Base Demo",
+          position: moonPosition(lon + 0.00022, lat + 0.00028),
+          label: {
+            text: "STANDALONE BASE DEMO",
+            font: "700 15px sans-serif",
+            fillColor: Cesium.Color.fromCssColorString("#f8fafc"),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 4,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -38),
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8500)
+          },
+          properties: {
+            category: "デモ基地",
+            detail: "単体HTMLで3D配置を確認するための、ブラウザ生成デモです。"
+          }
+        });
+        state.demoEntities.push(label);
+      }
+
+      function addMissionRoute() {
+        const route = [
+          [23.47297, 0.67408],
+          [23.47244, 0.67442],
+          [23.47182, 0.67490],
+          [23.47120, 0.67536],
+          [23.47055, 0.67510]
+        ];
+        const positions = route.map(([lon, lat]) => moonPosition(lon, lat));
+        const line = viewer.entities.add({
+          name: "ローバー走行ルート",
+          polyline: {
+            positions,
+            width: 5,
+            clampToGround: true,
+            material: new Cesium.PolylineGlowMaterialProperty({
+              glowPower: 0.24,
+              color: Cesium.Color.fromCssColorString("#34d399")
+            })
+          },
+          properties: {
+            category: "ミッション計画",
+            detail: "元ファイルのMission Plannerを模した固定デモルートです。保存APIは使いません。"
+          }
+        });
+        state.routeEntities.push(line);
+
+        route.forEach(([lon, lat], index) => {
+          const waypoint = viewer.entities.add({
+            name: `Waypoint ${index + 1}`,
+            position: moonPosition(lon, lat),
+            point: {
+              pixelSize: 9,
+              color: Cesium.Color.fromCssColorString("#34d399"),
+              outlineColor: Cesium.Color.fromCssColorString("#052e16"),
+              outlineWidth: 2,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            label: {
+              text: `WP${index + 1}`,
+              font: "700 11px sans-serif",
+              fillColor: Cesium.Color.fromCssColorString("#a7f3d0"),
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -16),
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 12000)
+            },
+            properties: {
+              category: "ミッションWaypoint",
+              detail: `仮のローバー経路上のWaypoint ${index + 1}です。`
+            }
+          });
+          state.routeEntities.push(waypoint);
+        });
+      }
+
+      function addSyntheticAnalysis() {
+        const detections = [
+          [23.4697, 0.6760, 42, 34, 0.91],
+          [23.4750, 0.6718, 26, 20, 0.84],
+          [23.4774, 0.6751, 58, 44, 0.78],
+          [23.4708, 0.6711, 18, 15, 0.72]
+        ];
+
+        detections.forEach(([lon, lat, major, minor, score], index) => {
+          const detection = viewer.entities.add({
+            name: `仮クレーター検出 ${index + 1}`,
+            position: moonPosition(lon, lat),
+            ellipse: {
+              semiMajorAxis: major,
+              semiMinorAxis: minor,
+              height: 0.35,
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+              material: Cesium.Color.fromCssColorString("#fb7185").withAlpha(0.16),
+              outline: true,
+              outlineColor: Cesium.Color.fromCssColorString("#fb7185"),
+              classificationType: Cesium.ClassificationType.BOTH
+            },
+            label: {
+              text: `${Math.round(score * 100)}%`,
+              font: "700 11px monospace",
+              fillColor: Cesium.Color.fromCssColorString("#fecdd3"),
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -15),
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 12000)
+            },
+            properties: {
+              category: "仮AI解析結果",
+              detail: `固定デモデータです。クレーター候補、信頼度${Math.round(score * 100)}%。AIサーバーには接続していません。`
+            }
+          });
+          state.analysisEntities.push(detection);
+        });
+      }
+
+      function setEntitiesVisible(entities, visible) {
+        entities.forEach((entity) => { entity.show = visible; });
+      }
+
+      function toggleButton(button, active) {
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+
+      function flyToMoon() {
+        stopOrbit();
+        viewer.camera.flyTo({
+          destination: moonPosition(0, 0, 5200000),
+          orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-90),
+            roll: 0
+          },
+          duration: 1.6
+        });
+        setStatus("月全体を表示しています");
+      }
+
+      function getApolloView() {
+        const target = moonPosition(
+          APOLLO_11.lon,
+          APOLLO_11.lat,
+          state.apolloTerrainHeight + 5
+        );
+        const localFrame = Cesium.Transforms.eastNorthUpToFixedFrame(target, MOON);
+        const destination = Cesium.Matrix4.multiplyByPoint(
+          localFrame,
+          new Cesium.Cartesian3(-280, -360, 240),
+          new Cesium.Cartesian3()
+        );
+        const direction = Cesium.Cartesian3.normalize(
+          Cesium.Cartesian3.subtract(target, destination, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        );
+        const up = MOON.geodeticSurfaceNormal(target, new Cesium.Cartesian3());
+        return { destination, direction, up };
+      }
+
+      function flyToApollo(duration = 1.6) {
+        stopOrbit();
+        const view = getApolloView();
+        viewer.camera.flyTo({
+          destination: view.destination,
+          orientation: {
+            direction: view.direction,
+            up: view.up
+          },
+          duration
+        });
+        setStatus("Apollo 11周辺のデモ基地を表示しています");
+      }
+
+      function flyToSouthPole() {
+        stopOrbit();
+        viewer.camera.flyTo({
+          destination: moonPosition(0, -89, 260000),
+          orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-72),
+            roll: 0
+          },
+          duration: 1.8
+        });
+        setStatus("月の南極域を表示しています");
+      }
+
+      function startOrbit() {
+        if (state.orbiting) {
+          stopOrbit();
+          return;
+        }
+        state.orbiting = true;
+        state.orbitHeading = 0;
+        toggleButton(el("orbitButton"), true);
+        setStatus("Apollo 11基地の周囲を自動周回しています");
+      }
+
+      function stopOrbit() {
+        if (!state.orbiting) return;
+        state.orbiting = false;
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        toggleButton(el("orbitButton"), false);
+      }
+
+      viewer.clock.onTick.addEventListener(() => {
+        if (!state.orbiting) return;
+        state.orbitHeading += 0.0025;
+        viewer.camera.lookAt(
+          moonPosition(APOLLO_11.lon, APOLLO_11.lat, state.apolloTerrainHeight + 5),
+          new Cesium.HeadingPitchRange(
+            state.orbitHeading,
+            Cesium.Math.toRadians(-28),
+            1050
+          )
+        );
+      });
+
+      function pickMoonPosition(screenPosition) {
+        const ray = viewer.camera.getPickRay(screenPosition);
+        if (!ray) return null;
+        return viewer.scene.globe.pick(ray, viewer.scene) || null;
+      }
+
+      function moonSurfaceDistance(a, b) {
+        const ca = MOON.cartesianToCartographic(a);
+        const cb = MOON.cartesianToCartographic(b);
+        const dLat = cb.latitude - ca.latitude;
+        const dLon = cb.longitude - ca.longitude;
+        const h = Math.sin(dLat / 2) ** 2 +
+          Math.cos(ca.latitude) * Math.cos(cb.latitude) * Math.sin(dLon / 2) ** 2;
+        return 2 * MOON_RADIUS * Math.asin(Math.min(1, Math.sqrt(h)));
+      }
+
+      function formatDistance(meters) {
+        return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${meters.toFixed(1)} m`;
+      }
+
+      function clearMeasurements() {
+        state.measurementEntities.forEach((entity) => viewer.entities.remove(entity));
+        state.measurementEntities.length = 0;
+        state.measurePositions.length = 0;
+        setStatus("計測表示を消去しました");
+      }
+
+      function setMeasuring(active) {
+        state.measuring = active;
+        state.measurePositions.length = 0;
+        toggleButton(el("measureButton"), active);
+        setStatus(active ? "月面上の2地点をクリックしてください" : "距離計測を終了しました");
+      }
+
+      function addMeasurementPoint(position, index) {
+        const point = viewer.entities.add({
+          name: `計測点 ${index}`,
+          position,
+          point: {
+            pixelSize: 11,
+            color: Cesium.Color.fromCssColorString("#fbbf24"),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          label: {
+            text: `P${index}`,
+            font: "700 12px sans-serif",
+            fillColor: Cesium.Color.fromCssColorString("#fef3c7"),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 3,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -17),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        });
+        state.measurementEntities.push(point);
+      }
+
+      function finishMeasurement() {
+        const [a, b] = state.measurePositions;
+        const distance = moonSurfaceDistance(a, b);
+        const midpoint = Cesium.Cartesian3.midpoint(a, b, new Cesium.Cartesian3());
+        const line = viewer.entities.add({
+          name: "月面距離",
+          polyline: {
+            positions: [a, b],
+            width: 4,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString("#fbbf24"),
+              dashLength: 18
+            })
+          }
+        });
+        const label = viewer.entities.add({
+          position: midpoint,
+          label: {
+            text: formatDistance(distance),
+            font: "700 13px sans-serif",
+            fillColor: Cesium.Color.fromCssColorString("#fef3c7"),
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString("#111827").withAlpha(0.86),
+            pixelOffset: new Cesium.Cartesian2(0, -12),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        });
+        state.measurementEntities.push(line, label);
+        setSelection("計測結果", `月面上の概算距離は ${formatDistance(distance)} です。`);
+        setMeasuring(false);
+      }
+
+      const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      clickHandler.setInputAction((event) => {
+        if (state.measuring) {
+          const position = pickMoonPosition(event.position);
+          if (!position) return;
+          state.measurePositions.push(position);
+          addMeasurementPoint(position, state.measurePositions.length);
+          if (state.measurePositions.length === 2) finishMeasurement();
+          else setStatus("1点目を設定しました。2点目をクリックしてください");
+          return;
+        }
+
+        const picked = viewer.scene.pick(event.position);
+        if (!Cesium.defined(picked) || !picked.id) return;
+        const entity = picked.id;
+        const time = viewer.clock.currentTime;
+        const category = entity.properties?.category?.getValue(time) || "3Dオブジェクト";
+        const detail = entity.properties?.detail?.getValue(time) || "月面上の表示要素です。";
+        setSelection(`${category} — ${entity.name || "名称なし"}`, detail);
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      function updateCameraReadout() {
+        const cartographic = MOON.cartesianToCartographic(viewer.camera.positionWC);
+        if (!cartographic) return;
+        el("cameraLon").textContent = `${Cesium.Math.toDegrees(cartographic.longitude).toFixed(4)}°`;
+        el("cameraLat").textContent = `${Cesium.Math.toDegrees(cartographic.latitude).toFixed(4)}°`;
+        el("cameraAlt").textContent = formatDistance(Math.max(0, cartographic.height));
+        el("cameraHeading").textContent = `${Cesium.Math.toDegrees(viewer.camera.heading).toFixed(1)}°`;
+        el("cameraPitch").textContent = `${Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(1)}°`;
+      }
+      viewer.camera.changed.addEventListener(updateCameraReadout);
+
+      el("homeButton").addEventListener("click", flyToMoon);
+      el("apolloButton").addEventListener("click", flyToApollo);
+      el("poleButton").addEventListener("click", flyToSouthPole);
+      el("orbitButton").addEventListener("click", startOrbit);
+
+      el("terrainButton").addEventListener("click", () => {
+        state.terrainEnabled = !state.terrainEnabled;
+        viewer.terrainProvider = state.terrainEnabled && state.terrainProvider
+          ? state.terrainProvider
+          : smoothTerrain();
+        toggleButton(el("terrainButton"), state.terrainEnabled);
+        setStatus(state.terrainEnabled ? "3D地形を有効にしました" : "3D地形を無効にしました");
+      });
+
+      el("lightingButton").addEventListener("click", () => {
+        state.lightingEnabled = !state.lightingEnabled;
+        viewer.scene.globe.enableLighting = state.lightingEnabled;
+        toggleButton(el("lightingButton"), state.lightingEnabled);
+        setStatus(state.lightingEnabled
+          ? "カメラ追従ライトによる月面の陰影を有効にしました"
+          : "月面の陰影を無効にしました");
+      });
+
+      el("baseButton").addEventListener("click", () => {
+        const visible = !state.demoEntities[0].show;
+        setEntitiesVisible(state.demoEntities, visible);
+        toggleButton(el("baseButton"), visible);
+        if (visible) flyToApollo();
+      });
+
+      el("sitesButton").addEventListener("click", () => {
+        const visible = !state.siteEntities[0].show;
+        setEntitiesVisible(state.siteEntities, visible);
+        toggleButton(el("sitesButton"), visible);
+      });
+
+      el("routeButton").addEventListener("click", () => {
+        const visible = !state.routeEntities[0].show;
+        setEntitiesVisible(state.routeEntities, visible);
+        toggleButton(el("routeButton"), visible);
+        if (visible) flyToApollo();
+      });
+
+      el("analysisButton").addEventListener("click", () => {
+        const visible = !state.analysisEntities[0].show;
+        setEntitiesVisible(state.analysisEntities, visible);
+        toggleButton(el("analysisButton"), visible);
+        if (visible) flyToApollo();
+      });
+
+      el("measureButton").addEventListener("click", () => setMeasuring(!state.measuring));
+      el("clearMeasureButton").addEventListener("click", clearMeasurements);
+
+      el("mobileToggle").addEventListener("click", () => {
+        el("sidebar").classList.toggle("open");
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.target instanceof HTMLInputElement) return;
+        const key = event.key.toLowerCase();
+        if (key === "h") flyToMoon();
+        if (key === "b") el("baseButton").click();
+        if (key === "r") el("routeButton").click();
+        if (key === "a") el("analysisButton").click();
+        if (key === "m") el("measureButton").click();
+        if (key === "o") startOrbit();
+        if (key === "escape") {
+          stopOrbit();
+          setMeasuring(false);
+        }
+      });
+
+      async function initialize() {
+        el("loadingText").textContent = "月面画像を準備中…";
+        addImagery();
+        addLandingSites();
+        addDemoBase();
+        addMissionRoute();
+        addSyntheticAnalysis();
+        updateCameraReadout();
+
+        viewer.camera.setView({
+          destination: getApolloView().destination,
+          orientation: {
+            direction: getApolloView().direction,
+            up: getApolloView().up
+          }
+        });
+
+        await loadTerrain();
+        flyToApollo(0.8);
+        setTimeout(() => el("loadingOverlay").classList.add("hidden"), 450);
+      }
+
+      initialize().catch((error) => {
+        console.error(error);
+        el("loadingText").textContent = `初期化エラー: ${error.message}`;
+      });
+    })();
+  </script>
+</body>
+</html>
